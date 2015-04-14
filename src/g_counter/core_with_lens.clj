@@ -19,7 +19,7 @@
           counters))
 
 (defn inc-id
-  [counter id]
+  [id counter]
   (update-in counter [id] (fnil inc 0)))
 
 (resolve-conflict {:a 12 :b 14 :c 100} {:a 4 :b 42 :d 1})
@@ -63,7 +63,7 @@
          timeout-ch (do (log/debug "timeout fired, incrementing for" id)
                         (let [new-shared-state
                               (swap! shared-state
-                                     #(lens/update %1 self-count-lens inc))]
+                                     #(lens/update %1 self-count-lens (partial inc-id id)))]
                           (>! out (get new-shared-state id)))
                         (recur (timeout TIMEOUT)))
 
