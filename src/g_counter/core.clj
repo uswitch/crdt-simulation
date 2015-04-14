@@ -6,7 +6,7 @@
             [clojure.pprint :refer (print-table)]))
 
 (defn resolve-conflict
-  "Resolves conflict between counters local and remote."
+  "Resolves conflict between counters."
   [& counters]
   (reduce (fn [c1 c2]
             (merge c1 c2
@@ -52,13 +52,11 @@
          control-ch (log/info "Stopping" id)
 
          in (do (log/debug "got counter, updating")
-                ;; ye-gods! should use lenses
-                ;; see https://github.com/ctford/journey-through-the-looking-glass
                 (swap! shared-state
-                       (fn [state new-counter] (update-in state [id]
-                                                         (partial
-                                                          resolve-conflict
-                                                          new-counter)))
+                       (fn [state new-counter]
+                         (update-in
+                          state [id]
+                          (partial resolve-conflict new-counter)))
                        val)
                 (recur timeout-ch))
 
@@ -132,9 +130,9 @@
             :let [count (apply + (vals (get shared-state-snapshot id)))]]
         {"i" id
          "count" count
-         "-" (- platonic-count count)
-         "own" (get-in shared-state-snapshot [id id])})
-      [{"i" "-", "count" platonic-count, "-" "-", "own" "-"}]))))
+         "off" (- platonic-count count)
+         "self" (get-in shared-state-snapshot [id id])})
+      [{"i" "-", "count" platonic-count, "off" "-", "self" "-"}]))))
 
 ;;;
 
@@ -163,5 +161,4 @@
   (make-system (partial lossy-broadcaster 0.5 0.5) 10)
   (make-system (partial lossy-broadcaster 0.75 0.75) 10)
   (make-system perfect-broadcaster 10)
-
   )
