@@ -4,18 +4,13 @@
             [clojure.core.async.lab :refer (broadcast)]
             [clojure.tools.logging :as log]
             [clojure.pprint :refer (print-table)]))
+;; on :p1
+{:p1 3 :p2 6} ; => total count: 9
 
 (defn resolve-conflict
   "Resolves conflict between counters."
   [& counters]
-  (reduce (fn [c1 c2]
-            (merge c1 c2
-                   (into
-                    {}
-                    (for [k (intersection (set (keys c1)) (set (keys c2)))]
-                      [k (max (get c1 k) (get c2 k))]))))
-          nil
-          counters))
+  (apply merge-with max counters))
 
 (defn inc-id
   [counter id]
@@ -34,7 +29,7 @@
   (stop! [this] "Stops the peer"))
 
 ;; could be sampled instead
-(def TIMEOUT 100)
+(def INTERVAL 100)
 
 (defn create-peer!
   "Creates and returns a peer. The peer will run in a go-thread."
@@ -44,7 +39,7 @@
         out (chan (sliding-buffer 1))]
     (log/info "Starting" id)
     (go-loop
-     [timeout-ch (timeout TIMEOUT)]
+     [timeout-ch (timeout INTERVAL)]
      (log/debug "current counter for" id ":" (get @shared-state id))
      (let [[val ch] (alts! [control-ch in timeout-ch])]
        (condp = ch
@@ -66,7 +61,7 @@
                                                         (update-in state [id]
                                                                    #(inc-id % id))))]
                           (>! out (get new-shared-state id)))
-                        (recur (timeout TIMEOUT)))
+                        (recur (timeout INTERVAL)))
 
          ; default
          (throw (Exception. "Unhandled case - programming error. You should probably use alt! instead of alts!")))))
@@ -155,10 +150,10 @@
 
   (make-system (partial lossy-broadcaster 0.5 0.5) 3)
   (make-system (partial lossy-broadcaster 0.9 0.1) 3)
-  (make-system (partial lossy-broadcaster 0.9 0.9) 3)
+  (make-system (partial lossy-broadcaster 0.1 0.1) 8)
   (make-system perfect-broadcaster 3)
 
-  (make-system (partial lossy-broadcaster 0.5 0.5) 10)
+  (make-system (partial lossy-broadcaster 0.5 0.5) 5)
   (make-system (partial lossy-broadcaster 0.75 0.75) 10)
   (make-system perfect-broadcaster 10)
   )
