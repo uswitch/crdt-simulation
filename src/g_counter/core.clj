@@ -4,8 +4,6 @@
             [clojure.core.async.lab :refer (broadcast)]
             [clojure.tools.logging :as log]
             [clojure.pprint :refer (print-table)]))
-;; on :p1
-{:p1 3 :p2 6} ; => total count: 9
 
 (defn resolve-conflict
   "Resolves conflict between counters."
