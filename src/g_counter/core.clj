@@ -14,16 +14,17 @@
   [counter id]
   (update-in counter [id] (fnil inc 0)))
 
-(resolve-conflict {:a 12 :b 14 :c 100} {:a 4 :b 42 :d 1})
-(resolve-conflict {:a 12 :b 14 :c 100})
-(resolve-conflict)
-(resolve-conflict {:a 12 :b 14 :c 100} {:a 4 :b 42 :d 1} {:d 2})
+(comment
+  (resolve-conflict {:a 12 :b 14 :c 100} {:a 4 :b 42 :d 1})
+  (resolve-conflict {:a 12 :b 14 :c 100})
+  (resolve-conflict)
+  (resolve-conflict {:a 12 :b 14 :c 100} {:a 4 :b 42 :d 1} {:d 2}))
 
 ;;;
 
 (defprotocol Peer
-  (in [this] "Returns in-channel, accepts counters.")
-  (out [this] "Returns out-channel, spews counters.")
+  (in    [this] "Returns in-channel, accepts counters.")
+  (out   [this] "Returns out-channel, spews counters.")
   (stop! [this] "Stops the peer"))
 
 ;; could be sampled instead
@@ -33,8 +34,8 @@
   "Creates and returns a peer. The peer will run in a go-thread."
   [shared-state id]
   (let [control-ch (chan)
-        in (chan (sliding-buffer 1))
-        out (chan (sliding-buffer 1))]
+        in         (chan (sliding-buffer 1))
+        out        (chan (sliding-buffer 1))]
     (log/info "Starting" id)
     (go-loop
      [timeout-ch (timeout INTERVAL)]
@@ -64,8 +65,8 @@
          ; default
          (throw (Exception. "Unhandled case - programming error. You should probably use alt! instead of alts!")))))
     (reify Peer
-      (in [this] in)
-      (out [this] out)
+      (in    [this] in)
+      (out   [this] out)
       (stop! [this] (close! control-ch)))))
 
 ;;;
