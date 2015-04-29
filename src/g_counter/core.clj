@@ -1,6 +1,6 @@
 (ns g-counter.core
   (:require [clojure.set :refer (intersection)]
-            [clojure.core.async :refer (go-loop chan alts! close! timeout >! sliding-buffer)]
+            [clojure.core.async :refer (go go-loop chan alts! close! timeout >! <! sliding-buffer)]
             [clojure.core.async.lab :refer (broadcast)]
             [clojure.tools.logging :as log]
             [clojure.pprint :refer (print-table)]))
@@ -112,6 +112,34 @@
     (reify Broadcaster
       (stop-broadcast! [this] (close! control-ch)))))
 
+(defn op-based-network
+  "Starts a broadcaster matching the assumptions for the op-based
+  CRDTs. That is:
+
+  - Every update eventually reaches the causal history of every replica
+  - The delivery order <d respects downstream preconditions in
+    downstream functions (we can't gurantee that, I guess?
+
+  max-lag is the maximum number of ms a message may be delayed in the
+  network."
+  [max-lag peers]
+  (let [ins (map in peers)
+        outs (map out peers)
+        control-ch (chan)]
+    (go-loop
+     []
+     (let [[val ch] (alts! (cons control-ch outs))]
+       (when-not (= ch control-ch)
+         (log/info "received" val)
+         (log/info "broadcasting" val)
+         (doseq [in ins]
+           (go
+            (<! (timeout (long (* (rand) max-lag))))
+            (>! in val)))
+         (recur))))
+    (reify Broadcaster
+      (stop-broadcast! [this] (close! control-ch)))))
+
 ;;;
 
 (defn print-peers
@@ -155,4 +183,8 @@
   (make-system (partial lossy-broadcaster 0.5 0.5) 5)
   (make-system (partial lossy-broadcaster 0.75 0.75) 10)
   (make-system perfect-broadcaster 10)
+
+
+  (make-system (partial op-based-network 1000) 5)
+  (make-system (partial op-based-network 100) 5)
   )
