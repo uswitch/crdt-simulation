@@ -28,7 +28,7 @@
   (stop! [this] "Stops the peer"))
 
 ;; could be sampled instead
-(def INTERVAL 100)
+(def INTERVAL 10)
 
 (defn create-state-peer!
   "Creates and returns a peer. The peer will run in a go-thread."
@@ -210,11 +210,50 @@
     (doseq [iter (range 3)]
       (print-peers @shared-state)
       (Thread/sleep 1500))
-    (stop-broadcast! broadcaster)
     (doall (map stop! peers))
+    (stop-broadcast! broadcaster)
     (print-peers @shared-state)))
 
+(defn make-graph-system
+  [broadcaster-fn n create-peer!]
+  (let [shared-state (atom {})
+        peers (doall (map (partial create-peer! shared-state) (range n)))
+        broadcaster (broadcaster-fn peers)]
+    (Thread/sleep 2500)
+    (let [shared-state-snapshot @shared-state
+          counters (vals (dissoc shared-state-snapshot :true-count))
+          drifts (map (partial - (:true-count shared-state-snapshot)) counters)]
+      (doall (map stop! peers))
+      (stop-broadcast! broadcaster)
+      drifts)))
+
+(defn- avg
+  [coll]
+  (float (/ (apply + coll) (count coll))))
+
+(defn- medium
+  [coll]
+  (nth (sort coll) (int (/ (count coll) 2))))
+
+(defn op-experiment
+  []
+  (doseq [max-lag [16 32 64]]
+    (doseq [sample (range 3)]
+      (let [drifts (make-graph-system (partial op-based-network max-lag)
+                                      5
+                                      create-op-peer!)]
+        (println
+         max-lag
+         sample
+         (apply min drifts)
+         (avg drifts)
+         (medium drifts)
+         (apply max drifts))))))
+
 (comment
+
+  (op-experiment)
+
   (def p (create-peer! 42))
   (stop! p)
   (clojure.core.async/put! (in p) {3 10})
