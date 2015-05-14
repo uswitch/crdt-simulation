@@ -30,7 +30,7 @@
 ;; could be sampled instead
 (def INTERVAL 100)
 
-(defn create-peer!
+(defn create-state-peer!
   "Creates and returns a peer. The peer will run in a go-thread."
   [shared-state id]
   (let [control-ch (chan)
@@ -60,6 +60,37 @@
                                                         (update-in state [id]
                                                                    #(inc-id % id))))]
                           (>! out (get new-shared-state id)))
+                        (recur (timeout INTERVAL)))
+
+         ; default
+         (throw (Exception. "Unhandled case - programming error. You should probably use alt! instead of alts!")))))
+    (reify Peer
+      (in    [this] in)
+      (out   [this] out)
+      (stop! [this] (close! control-ch)))))
+
+(defn create-op-peer!
+  "Creates and returns a op peer. The peer will run in a go-thread."
+  [shared-state id]
+  (let [control-ch (chan)
+        in         (chan)
+        out        (chan)]
+    (log/info "Starting" id)
+    (go-loop
+     [timeout-ch (timeout INTERVAL)]
+     (log/debug "current counter for" id ":" (get @shared-state id))
+     (let [[val ch] (alts! [control-ch in timeout-ch])]
+       (condp = ch
+
+         control-ch (log/info "Stopping" id)
+
+         in (do (log/debug "got counter, updating")
+                (swap! shared-state update-in [id] (fnil inc 0))
+                (recur timeout-ch))
+
+         timeout-ch (do (log/debug "timeout fired, incrementing for" id)
+                        (let [new-shared-state (swap! shared-state update-in [:true-count] (fnil inc 0))]
+                          (>! out id))
                         (recur (timeout INTERVAL)))
 
          ; default
@@ -142,7 +173,7 @@
 
 ;;;
 
-(defn print-peers
+(defn state-print-peers
   [shared-state-snapshot]
   (print-table
    (let [platonic-counter (apply resolve-conflict (vals shared-state-snapshot))
@@ -156,10 +187,23 @@
          "self" (get-in shared-state-snapshot [id id])})
       [{"i" "-", "count" platonic-count, "off" "-", "self" "-"}]))))
 
+(defn op-print-peers
+  [shared-state-snapshot]
+  (print-table
+   (let [platonic-count (:true-count shared-state-snapshot)]
+     (concat
+      (for [id (sort (keys (dissoc shared-state-snapshot :true-count)))
+            :let [count (get shared-state-snapshot id)]]
+        {"i" id
+         "count" count
+         "off" (- platonic-count count)
+         "self" "-"})
+      [{"i" "-", "count" platonic-count, "off" "-", "self" "-"}]))))
+
 ;;;
 
 (defn make-system
-  [broadcaster-fn n]
+  [broadcaster-fn n create-peer! print-peers]
   (let [shared-state (atom {})
         peers (doall (map (partial create-peer! shared-state) (range n)))
         broadcaster (broadcaster-fn peers)]
@@ -180,11 +224,13 @@
   (make-system (partial lossy-broadcaster 0.1 0.1) 8)
   (make-system perfect-broadcaster 3)
 
-  (make-system (partial lossy-broadcaster 0.5 0.5) 5)
+  (make-system (partial lossy-broadcaster 0.5 0.5) 5 create-state-peer! state-print-peers)
   (make-system (partial lossy-broadcaster 0.75 0.75) 10)
   (make-system perfect-broadcaster 10)
 
 
   (make-system (partial op-based-network 1000) 5)
   (make-system (partial op-based-network 100) 5)
+
+  (make-system (partial op-based-network 1000) 5 create-op-peer! op-print-peers)
   )
