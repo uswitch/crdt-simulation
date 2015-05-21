@@ -69,29 +69,39 @@
       (out   [this] out)
       (stop! [this] (close! control-ch)))))
 
+(defn- uuid
+  []
+  (.toString (java.util.UUID/randomUUID)))
+
 (defn create-op-peer!
   "Creates and returns a op peer. The peer will run in a go-thread."
   [shared-state id]
   (let [control-ch (chan)
-        in         (chan)
-        out        (chan)]
+        in         (chan 1024)
+        out        (chan 1024)]
     (log/info "Starting" id)
     (go-loop
-     [timeout-ch (timeout INTERVAL)]
+     [success-messages #{}
+      timeout-ch (timeout INTERVAL)]
      (log/debug "current counter for" id ":" (get @shared-state id))
-     (let [[val ch] (alts! [control-ch in timeout-ch])]
+     (let [[msg ch] (alts! [control-ch in timeout-ch])]
        (condp = ch
 
          control-ch (log/info "Stopping" id)
 
-         in (do (log/debug "got counter, updating")
-                (swap! shared-state update-in [id] (fnil inc 0))
-                (recur timeout-ch))
+         in (do (log/info "got counter, updating")
+                (if (and (contains? success-messages msg)
+                         true ;; pre-condition
+                         )
+                  (recur success-messages timeout-ch)
+                  (do
+                    (swap! shared-state update-in [id] (fnil inc 0))
+                    (recur (conj success-messages msg) timeout-ch))))
 
          timeout-ch (do (log/debug "timeout fired, incrementing for" id)
-                        (let [new-shared-state (swap! shared-state update-in [:true-count] (fnil inc 0))]
-                          (>! out id))
-                        (recur (timeout INTERVAL)))
+                        (swap! shared-state update-in [:true-count] (fnil inc 0))
+                        (>! out (uuid))
+                        (recur success-messages (timeout INTERVAL)))
 
          ; default
          (throw (Exception. "Unhandled case - programming error. You should probably use alt! instead of alts!")))))
@@ -149,7 +159,7 @@
 
   - Every update eventually reaches the causal history of every replica
   - The delivery order <d respects downstream preconditions in
-    downstream functions (we can't gurantee that, I guess?
+    downstream functions.
 
   max-lag is the maximum number of ms a message may be delayed in the
   network."
@@ -158,16 +168,27 @@
         outs (map out peers)
         control-ch (chan)]
     (go-loop
-     []
-     (let [[val ch] (alts! (cons control-ch outs))]
-       (when-not (= ch control-ch)
-         (log/info "received" val)
-         (log/info "broadcasting" val)
-         (doseq [in ins]
-           (go
-            (<! (timeout (long (* (rand) max-lag))))
-            (>! in val)))
-         (recur))))
+     [msgs #{}
+      t (timeout 10)]
+     (let [[msg ch] (alts! (cons t (cons control-ch outs)))]
+       (cond
+
+        (= ch t) (do
+                   (doseq [msg msgs]
+                     (doseq [in ins]
+                       (go
+                        (<! (timeout (long (* (rand) max-lag))))
+                        (>! in msg))))
+                   (recur msgs (timeout 10)))
+
+        (= ch control-ch) (log/info "Terminating op based network")
+
+        msg (do
+             (log/info "received" msg)
+             (log/info "broadcasting" msg "infinitly often")
+             (recur (conj msgs msg) t))
+
+        :else (recur msgs t))))
     (reify Broadcaster
       (stop-broadcast! [this] (close! control-ch)))))
 
@@ -223,6 +244,7 @@
     (let [shared-state-snapshot @shared-state
           counters (vals (dissoc shared-state-snapshot :true-count))
           drifts (map (partial - (:true-count shared-state-snapshot)) counters)]
+      (log/info "drifts" drifts)
       (doall (map stop! peers))
       (stop-broadcast! broadcaster)
       drifts)))
